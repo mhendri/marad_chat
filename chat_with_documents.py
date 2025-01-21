@@ -11,10 +11,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
 
 
-
 st.set_page_config(page_title="MARAD Chat", page_icon="📄")
 st.header('Chat with your documents')
 st.write('')
+
 
 class CustomDocChatbot:
 
@@ -22,12 +22,14 @@ class CustomDocChatbot:
         utils.sync_st_session()
         self.llm = utils.configure_llm()
         self.embedding_model = utils.configure_embedding_model()
+        # self.vectordb = utils.load_or_preload_documents()
 
     def save_file(self, file):
         folder = 'tmp'
         if not os.path.exists(folder):
             os.makedirs(folder)
-        
+
+        # this has no name because it is not the ST file upload object
         file_path = f'./{folder}/{file.name}'
         with open(file_path, 'wb') as f:
             f.write(file.getvalue())
@@ -37,26 +39,22 @@ class CustomDocChatbot:
     def setup_qa_chain(self, uploaded_files):
         # Load documents
         docs = []
-        for file in uploaded_files:
-            file_path = self.save_file(file)
-            loader = PyPDFLoader(file_path)
-            docs.extend(loader.load())
-        
-        # Split documents and store in vector db
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-        splits = text_splitter.split_documents(docs)
-        vectordb = FAISS.from_documents(splits, self.embedding_model)
+        for file_name in os.listdir(uploaded_files):
+            # Construct full file path
+            file_path = os.path.join(uploaded_files, file_name)
+            if os.path.isfile(file_path):  # Ensure it's a file and not a directory
+                loader = PyPDFLoader(file_path)
+                docs.extend(loader.load())
+
+        vectordb = utils.load_or_preload_documents(docs)
 
         # Define retriever
         retriever = vectordb.as_retriever(
             search_type='mmr',
-            search_kwargs={'k':3, 'fetch_k':5}
+            search_kwargs={'k': 3, 'fetch_k': 5}
         )
 
-        # Setup memory for contextual conversation        
+        # Setup memory for contextual conversation
         memory = ConversationBufferMemory(
             memory_key='chat_history',
             output_key='answer',
@@ -90,36 +88,32 @@ class CustomDocChatbot:
     @utils.enable_chat_history
     def main(self):
 
-        # User Inputs
-        uploaded_files = st.sidebar.file_uploader(label='Upload PDF files', type=['pdf'], accept_multiple_files=True)
-        if not uploaded_files:
-            st.error("Please upload PDF documents to continue!")
-            st.stop()
-
         user_query = st.chat_input(placeholder="Ask me anything!")
 
-        if uploaded_files and user_query:
-            qa_chain = self.setup_qa_chain(uploaded_files)
+        if user_query:
+            qa_chain = self.setup_qa_chain('tmp')
 
             utils.display_msg(user_query, 'user')
 
             with st.chat_message("assistant"):
                 st_cb = StreamHandler(st.empty())
                 result = qa_chain.invoke(
-                    {"question":user_query},
+                    {"question": user_query},
                     {"callbacks": [st_cb]}
                 )
                 response = result["answer"]
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": response})
                 utils.print_qa(CustomDocChatbot, user_query, response)
 
                 # to show references
-                for idx, doc in enumerate(result['source_documents'],1):
+                for idx, doc in enumerate(result['source_documents'], 1):
                     filename = os.path.basename(doc.metadata['source'])
                     page_num = doc.metadata['page']
                     ref_title = f":blue[Reference {idx}: *{filename} - page.{page_num}*]"
                     with st.popover(ref_title):
                         st.caption(doc.page_content)
+
 
 if __name__ == "__main__":
     obj = CustomDocChatbot()
