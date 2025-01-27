@@ -12,8 +12,8 @@ from langchain.prompts import PromptTemplate
 
 
 st.set_page_config(page_title="MARAD Chat", page_icon="📄")
-st.header('Chat with your documents')
-st.write('')
+st.header('MARAD Chat')
+st.write('Ask me questions about maritime policy, fuel standards, shipping, decorbonization and more!')
 
 
 class CustomDocChatbot:
@@ -25,7 +25,7 @@ class CustomDocChatbot:
         # self.vectordb = utils.load_or_preload_documents()
 
     def save_file(self, file):
-        folder = 'tmp'
+        folder = 'corpus'
         if not os.path.exists(folder):
             os.makedirs(folder)
 
@@ -36,17 +36,10 @@ class CustomDocChatbot:
         return file_path
 
     @st.spinner('Analyzing documents..')
-    def setup_qa_chain(self, uploaded_files):
+    def setup_qa_chain(self, corpus):
         # Load documents
-        docs = []
-        for file_name in os.listdir(uploaded_files):
-            # Construct full file path
-            file_path = os.path.join(uploaded_files, file_name)
-            if os.path.isfile(file_path):  # Ensure it's a file and not a directory
-                loader = PyPDFLoader(file_path)
-                docs.extend(loader.load())
-
-        vectordb = utils.load_or_preload_documents(docs)
+        
+        vectordb = utils.load_or_preload_documents(corpus)
 
         # Define retriever
         retriever = vectordb.as_retriever(
@@ -89,9 +82,10 @@ class CustomDocChatbot:
     def main(self):
 
         user_query = st.chat_input(placeholder="Ask me anything!")
+        qa_chain = self.setup_qa_chain('corpus')
 
         if user_query:
-            qa_chain = self.setup_qa_chain('tmp')
+            # qa_chain = self.setup_qa_chain('corpus')
 
             utils.display_msg(user_query, 'user')
 

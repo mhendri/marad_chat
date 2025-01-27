@@ -118,7 +118,7 @@ def configure_embedding_model():
     embedding_model = OpenAIEmbeddings()
     return embedding_model
 
-def load_or_preload_documents(docs, directory="tmp"):
+def load_or_preload_documents(docs, directory="corpus"):
         """Load existing vector store or preload PDF documents from the specified directory."""
         if os.path.exists(VECTOR_STORE_PATH):
             st.info("Loading vector store from disk...")
@@ -132,6 +132,15 @@ def load_or_preload_documents(docs, directory="tmp"):
 
         st.info("No existing vector store found. Loading and indexing PDF documents. This may take a few moments...")
 
+        docs = []
+        for file_name in os.listdir(directory):
+            # Construct full file path
+            file_path = os.path.join(directory, file_name)
+            print(file_path)
+            if os.path.isfile(file_path):  # Ensure it's a file and not a directory
+                loader = PyPDFLoader(file_path)
+                docs.extend(loader.load())
+
         # Split documents and store in vector db
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -142,5 +151,5 @@ def load_or_preload_documents(docs, directory="tmp"):
 
         # Save the vector store to disk
         vector_store.save_local(VECTOR_STORE_PATH)
-        st.success(f"Successfully preloaded {len(directory)} PDF documents into the vector store and saved it to disk.")
+        st.success(f"Successfully preloaded {len(docs)} PDF documents into the vector store and saved it to disk.")
         return vector_store
