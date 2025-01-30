@@ -16,41 +16,78 @@ logger = get_logger('Langchain-Chatbot')
 VECTOR_STORE_PATH = "vector_store.faiss"
 
 
-#decorator
-def enable_chat_history(func):
-    if os.environ.get("OPENAI_API_KEY"):
+import os
+import streamlit as st
+from functools import wraps
 
-        # to clear chat history after swtching chatbot
+def enable_chat_history(func):
+    """
+    Decorator to manage chat history persistence in Streamlit's session state.
+
+    - Clears chat history when switching chatbots.
+    - Maintains and displays chat history in the UI.
+    
+    Args:
+        func (Callable): The function to wrap.
+    
+    Returns:
+        Callable: The wrapped function.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not os.environ.get("OPENAI_API_KEY"):
+            return func(*args, **kwargs)  # Proceed without chat history if API key is missing
+
         current_page = func.__qualname__
+
+        # Clear chat history when switching chatbot pages
         if "current_page" not in st.session_state:
             st.session_state["current_page"] = current_page
-        if st.session_state["current_page"] != current_page:
+        elif st.session_state["current_page"] != current_page:
             try:
                 st.cache_resource.clear()
-                del st.session_state["current_page"]
-                del st.session_state["messages"]
-            except:
-                pass
+                st.session_state.pop("current_page", None)
+                st.session_state.pop("messages", None)
+            except Exception as e:
+                st.warning(f"Failed to clear chat history: {e}")
 
-        # to show chat history on ui
+        # Initialize chat history if it doesn't exist
         if "messages" not in st.session_state:
             st.session_state["messages"] = [{"role": "assistant", "content": "How can I help you?"}]
+
+        # Display chat history in the UI
         for msg in st.session_state["messages"]:
             st.chat_message(msg["role"]).write(msg["content"])
 
-    def execute(*args, **kwargs):
-        func(*args, **kwargs)
-    return execute
+        return func(*args, **kwargs)
 
-def display_msg(msg, author):
-    """Method to display message on the UI
+    return wrapper
+
+
+def display_msg(msg: str, author: str) -> None:
+    """
+    Displays a message in the chat UI and stores it in the session state.
 
     Args:
-        msg (str): message to display
-        author (str): author of the message -user/assistant
+        msg (str): The message to display.
+        author (str): The author of the message; must be 'user' or 'assistant'.
+
+    Raises:
+        ValueError: If `author` is not 'user' or 'assistant'.
     """
+    if author not in {"user", "assistant"}:
+        raise ValueError("author must be either 'user' or 'assistant'")
+
+    # Ensure messages list exists in session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Append message to session state
     st.session_state.messages.append({"role": author, "content": msg})
+
+    # Display message in chat UI
     st.chat_message(author).write(msg)
+
 
 def choose_custom_openai_key():
     openai_api_key = st.sidebar.text_input(
@@ -87,6 +124,7 @@ def choose_custom_openai_key():
 
 def configure_llm():
     available_llms = ["gpt-4o","llama3.1:8b","llama3.2:3b","use your openai api key"]
+    
     llm_opt = st.sidebar.radio(
         label="LLM",
         options=available_llms,
@@ -121,9 +159,9 @@ def configure_embedding_model():
 def load_or_preload_documents(docs, directory="corpus"):
         """Load existing vector store or preload PDF documents from the specified directory."""
         if os.path.exists(VECTOR_STORE_PATH):
-            st.info("Loading vector store from disk...")
+            st.toast("Loading vector store from disk...")
             vector_store = FAISS.load_local(VECTOR_STORE_PATH, configure_embedding_model(), allow_dangerous_deserialization=True)
-            st.success("Vector store loaded successfully.")
+            st.toast("Vector store loaded successfully.")
             return vector_store
 
         if not os.path.exists(directory):
