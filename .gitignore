@@ -2,4 +2,3 @@
 /tmp
 /corpus
 .streamlit
-vector_store.faiss
