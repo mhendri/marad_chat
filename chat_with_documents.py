@@ -11,10 +11,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
 
 
+st.set_page_config(page_title="MARAD Chat", page_icon="📄", initial_sidebar_state="collapsed")
+st.header('MARAD Chat')
+st.write('Ask me questions about maritime policy, fuel standards, shipping, decarbonization, and more!')
 
-st.set_page_config(page_title="MARAD Chat", page_icon="📄")
-st.header('Chat with your documents')
-st.write('')
 
 class CustomDocChatbot:
 
@@ -24,102 +24,110 @@ class CustomDocChatbot:
         self.embedding_model = utils.configure_embedding_model()
 
     def save_file(self, file):
-        folder = 'tmp'
+        folder = 'corpus'
         if not os.path.exists(folder):
             os.makedirs(folder)
-        
+
         file_path = f'./{folder}/{file.name}'
         with open(file_path, 'wb') as f:
             f.write(file.getvalue())
         return file_path
 
-    @st.spinner('Analyzing documents..')
-    def setup_qa_chain(self, uploaded_files):
-        # Load documents
-        docs = []
-        for file in uploaded_files:
-            file_path = self.save_file(file)
-            loader = PyPDFLoader(file_path)
-            docs.extend(loader.load())
-        
-        # Split documents and store in vector db
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-        splits = text_splitter.split_documents(docs)
-        vectordb = FAISS.from_documents(splits, self.embedding_model)
+    @st.spinner('Analyzing documents...')
+    def setup_qa_chain(self, corpus):
+        print("called")
+        vectordb = utils.load_or_preload_documents(corpus)
 
         # Define retriever
         retriever = vectordb.as_retriever(
             search_type='mmr',
-            search_kwargs={'k':3, 'fetch_k':5}
+            search_kwargs={'k': 3, 'fetch_k': 5}
         )
 
-        # Setup memory for contextual conversation        
+        # Setup memory for contextual conversation
         memory = ConversationBufferMemory(
-            memory_key='chat_history',
-            output_key='answer',
+            memory_key="chat_history",
+            output_key="answer",  # Explicitly set output_key to avoid multiple key errors
             return_messages=True
         )
 
-        # prompt = PromptTemplate(
-        # input_variables=["context", "question", "chat_history"],
-        # template=(
-        #     "You are a helpful assistant specializing in analyzing documents. You are an expert in the maritime industry."
-        #     "Use the following context to answer the question. "
-        #     "If you don't know the answer, say so clearly.\n\n"
-        #     "Context: {context}\n\n"
-        #     "Chat History: {chat_history}\n\n"
-        #     "Question: {question}\n\n"
-        #     "Answer:"
-        # )
-    # )
+        # Custom prompt to ensure no query repetition
+        custom_prompt = PromptTemplate.from_template(
+    """
+    You are a helpful AI assistant. Answer the user's question concisely and accurately.
+    
+    Do **not** repeat or rephrase the user's question in your response. Provide direct, relevant, and well-structured answers.
 
-        # Setup LLM and QA chain
+    If the context is not relevant, state that you don't have enough information.
+
+    --- 
+    Context:
+    {context}
+    
+    Chat History:
+    {chat_history}
+
+    ---
+    User's Question: {question}
+    AI Response:
+    """
+)
+
+        # Use ConversationalRetrievalChain to support chat history
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=retriever,
             memory=memory,
             return_source_documents=True,
-            verbose=False
-            # combine_docs_chain_kwargs={"prompt": prompt}
+            verbose=False,
+            combine_docs_chain_kwargs={"prompt": custom_prompt}
         )
         return qa_chain
 
     @utils.enable_chat_history
     def main(self):
-
-        # User Inputs
-        uploaded_files = st.sidebar.file_uploader(label='Upload PDF files', type=['pdf'], accept_multiple_files=True)
-        if not uploaded_files:
-            st.error("Please upload PDF documents to continue!")
-            st.stop()
-
         user_query = st.chat_input(placeholder="Ask me anything!")
 
-        if uploaded_files and user_query:
-            qa_chain = self.setup_qa_chain(uploaded_files)
+        # Initialize chat history in session state if not present
+        if "chat_history" not in st.session_state:
+            st.session_state["chat_history"] = []
 
+        # Check if QA chain is already in session state
+        if "qa_chain" not in st.session_state:
+            st.session_state.qa_chain = self.setup_qa_chain('corpus')
+
+        qa_chain = st.session_state.qa_chain  # Retrieve persisted QA chain
+
+        if user_query:
             utils.display_msg(user_query, 'user')
 
             with st.chat_message("assistant"):
                 st_cb = StreamHandler(st.empty())
+
+                # Pass chat history correctly
                 result = qa_chain.invoke(
-                    {"question":user_query},
+                    {"question": user_query},
                     {"callbacks": [st_cb]}
                 )
-                response = result["answer"]
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                response = result["answer"]  # ConversationalRetrievalChain uses "answer"
+
+                # Store conversation history in session state
+                st.session_state["chat_history"].append({"role": "user", "content": user_query})
+                st.session_state["chat_history"].append({"role": "assistant", "content": response})
+
+                # Display the response
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": response})
                 utils.print_qa(CustomDocChatbot, user_query, response)
 
-                # to show references
-                for idx, doc in enumerate(result['source_documents'],1):
-                    filename = os.path.basename(doc.metadata['source'])
-                    page_num = doc.metadata['page']
+                # Show references
+                for idx, doc in enumerate(result.get('source_documents', []), 1):
+                    filename = os.path.basename(doc.metadata.get('source', 'Unknown'))
+                    page_num = doc.metadata.get('page', 'N/A')
                     ref_title = f":blue[Reference {idx}: *{filename} - page.{page_num}*]"
                     with st.popover(ref_title):
                         st.caption(doc.page_content)
+
 
 if __name__ == "__main__":
     obj = CustomDocChatbot()
