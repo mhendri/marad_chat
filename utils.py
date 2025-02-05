@@ -15,9 +15,6 @@ from langchain_community.document_loaders import PyPDFLoader
 logger = get_logger('Langchain-Chatbot')
 VECTOR_STORE_PATH = "vector_store.faiss"
 
-
-import os
-import streamlit as st
 from functools import wraps
 
 def enable_chat_history(func):
@@ -45,9 +42,9 @@ def enable_chat_history(func):
             st.session_state["current_page"] = current_page
         elif st.session_state["current_page"] != current_page:
             try:
-                st.cache_resource.clear()
                 st.session_state.pop("current_page", None)
                 st.session_state.pop("messages", None)
+                st.session_state.pop("qa_chain", None)  # Clear QA chain
             except Exception as e:
                 st.warning(f"Failed to clear chat history: {e}")
 
@@ -57,11 +54,13 @@ def enable_chat_history(func):
 
         # Display chat history in the UI
         for msg in st.session_state["messages"]:
-            st.chat_message(msg["role"]).write(msg["content"])
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
 
         return func(*args, **kwargs)
 
     return wrapper
+
 
 
 def display_msg(msg: str, author: str) -> None:
@@ -86,7 +85,9 @@ def display_msg(msg: str, author: str) -> None:
     st.session_state.messages.append({"role": author, "content": msg})
 
     # Display message in chat UI
-    st.chat_message(author).write(msg)
+    with st.chat_message(author):
+        st.write(msg)
+
 
 
 def choose_custom_openai_key():
